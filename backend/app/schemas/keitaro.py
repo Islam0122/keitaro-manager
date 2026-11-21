@@ -81,7 +81,7 @@ class StreamOfferOut(KeitaroModel):
     @classmethod
     def _share(cls, value: Any) -> int:
         number = _to_float(value)
-        return int(round(number)) if number is not None else 0
+        return round(number) if number is not None else 0
 
 
 class StreamOut(KeitaroModel):

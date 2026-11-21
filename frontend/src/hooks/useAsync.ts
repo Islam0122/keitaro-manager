@@ -10,6 +10,8 @@ export function useAsync<T>(loader: () => Promise<T>, deps: unknown[] = []) {
   const [loading, setLoading] = useState(true)
   const requestId = useRef(0)
 
+  // `deps` is the caller's dependency list (like useEffect); the loader closure is re-created on each render.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const run = useCallback(loader, deps)
 
   const reload = useCallback(async () => {

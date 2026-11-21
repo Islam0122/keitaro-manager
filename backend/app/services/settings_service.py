@@ -5,8 +5,11 @@ from dataclasses import dataclass
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.core.exceptions import ValidationAppError
+from app.core.logging import register_secret
 from app.core.security import decrypt_secret, encrypt_secret, mask_secret
-from app.integrations.keitaro.client import KeitaroClient
+from app.core.url_guard import UnsafeURLError, URLGuard
+from app.integrations.keitaro.client import KeitaroClient, build_base_url
 from app.integrations.keitaro.exceptions import KeitaroError, KeitaroNotConfiguredError
 from app.repositories.keitaro_config_repository import KeitaroConfigRepository
 from app.schemas.settings import ConnectionTestIn, ConnectionTestOut, SettingsOut, SettingsUpdate
@@ -16,7 +19,13 @@ ClientFactory = Callable[[str, str, float], KeitaroClient]
 
 
 def default_client_factory(api_url: str, api_key: str, timeout: float) -> KeitaroClient:
-    return KeitaroClient(api_url, api_key, timeout=timeout)
+    return KeitaroClient(api_url, api_key, timeout=timeout, retries=get_settings().keitaro_retries)
+
+
+def same_endpoint(a: str | None, b: str | None) -> bool:
+    if not a or not b:
+        return False
+    return build_base_url(a).lower() == build_base_url(b).lower()
 
 
 @dataclass(frozen=True)
@@ -33,10 +42,18 @@ class KeitaroConnection:
 
 
 class SettingsService:
-    def __init__(self, session: AsyncSession, client_factory: ClientFactory = default_client_factory) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        client_factory: ClientFactory = default_client_factory,
+        guard: URLGuard | None = None,
+    ) -> None:
         self.session = session
         self.repo = KeitaroConfigRepository(session)
         self.client_factory = client_factory
+        self.guard = guard or URLGuard(
+            allow_http=get_settings().keitaro_allow_http, allow_private=get_settings().keitaro_allow_private_hosts
+        )
 
     async def resolve(self) -> KeitaroConnection:
         """DB settings take priority; environment variables are used as a fallback."""
@@ -46,6 +63,7 @@ class SettingsService:
         db_key = decrypt_secret(config.api_key_encrypted) if config and config.api_key_encrypted else None
         api_url = db_url or env.keitaro_api_url
         api_key = db_key or env.keitaro_api_key
+        register_secret(api_key)
         if db_url and db_key:
             source = "database"
         elif api_url and api_key:
@@ -64,6 +82,8 @@ class SettingsService:
         conn = await self.resolve()
         if not conn.configured:
             raise KeitaroNotConfiguredError()
+        # Re-validated on every use: DNS of an accepted host may have changed since it was saved.
+        await self.guard.validate(conn.api_url)  # type: ignore[arg-type]
         return self.client_factory(conn.api_url, conn.api_key, conn.timeout), conn  # type: ignore[arg-type]
 
     async def get(self) -> SettingsOut:
@@ -80,20 +100,32 @@ class SettingsService:
         )
 
     async def update(self, data: SettingsUpdate) -> SettingsOut:
+        api_url = await self.guard.validate(data.api_url)
         config = await self.repo.get()
+        current = await self.resolve()
+        if not data.api_key and current.api_key and not same_endpoint(current.api_url, api_url):
+            # Never silently re-use a stored key for a different host: that would leak it to whoever owns that host.
+            raise ValidationAppError(
+                "При смене API URL укажите API Key заново",
+                errors=[{"field": "api_key", "message": "Укажите API Key для нового адреса"}],
+            )
         fields: dict[str, object] = {
-            "api_url": data.api_url,
+            "api_url": api_url,
             "timeout": data.timeout,
             "default_safe_url": data.default_safe_url,
         }
         if data.api_key:
             fields["api_key_encrypted"] = encrypt_secret(data.api_key)
-        elif not (config and config.api_key_encrypted):
-            env_key = get_settings().keitaro_api_key
-            if env_key:
-                fields["api_key_encrypted"] = encrypt_secret(env_key)
+            register_secret(data.api_key)
+        elif config and config.api_key_encrypted:
+            # re-encrypt with the current key derivation (transparently migrates legacy ciphertexts)
+            fields["api_key_encrypted"] = encrypt_secret(decrypt_secret(config.api_key_encrypted))
+        elif current.api_key:
+            fields["api_key_encrypted"] = encrypt_secret(current.api_key)
         audit = AuditLogger(self.session)
-        async with audit.track("settings.update", details={"api_url": data.api_url, "api_key_changed": bool(data.api_key)}):
+        async with audit.track(
+            "settings.update", details={"api_url": api_url, "api_key_changed": bool(data.api_key)}
+        ):
             await self.repo.upsert(**fields)
             await self.session.commit()
         return await self.get()
@@ -101,9 +133,18 @@ class SettingsService:
     async def test_connection(self, data: ConnectionTestIn) -> ConnectionTestOut:
         conn = await self.resolve()
         api_url = data.api_url or conn.api_url
-        api_key = (data.api_key or "").strip() or conn.api_key
+        api_key = (data.api_key or "").strip() or None
+        if api_key is None:
+            if data.api_url and not same_endpoint(data.api_url, conn.api_url):
+                return ConnectionTestOut(ok=False, message="Для проверки нового адреса укажите API Key")
+            api_key = conn.api_key
         if not api_url or not api_key:
             return ConnectionTestOut(ok=False, message="Укажите API URL и API Key")
+        try:
+            api_url = await self.guard.validate(api_url)
+        except UnsafeURLError as exc:
+            return ConnectionTestOut(ok=False, message=str(exc))
+        register_secret(api_key)
         client = self.client_factory(api_url, api_key, conn.timeout)
         started = time.perf_counter()
         try:

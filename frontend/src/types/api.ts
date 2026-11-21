@@ -184,9 +184,25 @@ export interface Health {
   keitaro_configured: boolean
 }
 
+export interface User {
+  id: number
+  username: string
+  is_active: boolean
+  last_login_at: string | null
+}
+
+export interface TokenResponse {
+  access_token: string
+  token_type: 'bearer'
+  expires_at: string
+  user: User
+}
+
 export interface CampaignLog {
   id: number
   campaign_keitaro_id: number | null
+  user_id: number | null
+  username: string | null
   action: string
   status: 'success' | 'error'
   message: string | null

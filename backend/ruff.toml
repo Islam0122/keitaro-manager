@@ -1,0 +1,17 @@
+target-version = "py312"
+line-length = 120
+extend-exclude = ["alembic/versions/0001_initial_schema.py"]
+
+[lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "ASYNC", "RUF"]
+ignore = [
+    "RUF001", "RUF002", "RUF003",  # Cyrillic text in messages is intentional
+    "B008",                         # FastAPI Depends() in defaults
+    "S105", "S106",                 # "password"/"token" names are not hard-coded secrets
+]
+
+[lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106", "S311", "E501"]
+
+[lint.isort]
+known-third-party = ["alembic"]

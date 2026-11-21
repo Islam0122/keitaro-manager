@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 
 import { settingsApi } from '@/api'
+import { useAuth } from '@/auth/AuthContext'
 import { IconCampaigns, IconClose, IconLayers, IconLog, IconMenu, IconPlus, IconSettings } from '@/components/ui/Icons'
 import { cn } from '@/lib/format'
 import type { Health } from '@/types/api'
@@ -15,6 +16,7 @@ const nav = [
 ]
 
 function Sidebar({ onNavigate, health }: { onNavigate?: () => void; health: Health | null }) {
+  const { user, logout } = useAuth()
   return (
     <div className="flex h-full flex-col bg-sidebar text-slate-300">
       <div className="flex h-16 items-center gap-3 px-5">
@@ -56,6 +58,20 @@ function Sidebar({ onNavigate, health }: { onNavigate?: () => void; health: Heal
           </span>
         </div>
         {health && <p className="mt-1 text-slate-600">v{health.version}</p>}
+        {user && (
+          <div className="mt-3 flex items-center justify-between gap-2 border-t border-slate-800 pt-3">
+            <span className="truncate text-slate-300" title={user.username}>
+              {user.username}
+            </span>
+            <button
+              type="button"
+              onClick={logout}
+              className="rounded-md px-2 py-1 text-slate-400 transition-colors hover:bg-sidebar-hover hover:text-white"
+            >
+              Выйти
+            </button>
+          </div>
+        )}
       </div>
     </div>
   )

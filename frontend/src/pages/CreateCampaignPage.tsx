@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 
 import { campaignsApi, settingsApi } from '@/api'
+import type { RollbackReport } from '@/api/client'
 import { ApiError, errorMessage } from '@/api/client'
 import { ErrorState } from '@/components/ErrorState'
 import { Alert } from '@/components/ui/Alert'
@@ -51,6 +52,7 @@ export default function CreateCampaignPage() {
   const [errors, setErrors] = useState<Errors>({})
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
+  const [rollback, setRollback] = useState<RollbackReport | null>(null)
 
   const set = (key: keyof FormState) => (value: string) => {
     setForm((f) => ({ ...f, [key]: value }))
@@ -62,6 +64,7 @@ export default function CreateCampaignPage() {
     const found = validate(form)
     setErrors(found)
     setSubmitError(null)
+    setRollback(null)
     if (Object.keys(found).length) return
     setSubmitting(true)
     try {
@@ -82,6 +85,7 @@ export default function CreateCampaignPage() {
         setErrors(fieldErrors)
       }
       setSubmitError(errorMessage(err))
+      setRollback(err instanceof ApiError ? err.rollback : null)
     } finally {
       setSubmitting(false)
     }
@@ -200,7 +204,19 @@ export default function CreateCampaignPage() {
 
               {submitError && (
                 <div className="sm:col-span-2">
-                  <Alert title="Кампания не создана">{submitError}</Alert>
+                  <Alert tone={rollback && !rollback.ok ? 'warning' : 'error'} title="Кампания не создана">
+                    {submitError}
+                    {rollback?.performed && (
+                      <ul className="mt-2 space-y-0.5 text-xs">
+                        {rollback.steps.map((s) => (
+                          <li key={`${s.object}-${s.id}`}>
+                            {s.ok ? '✓' : '✗'} {s.object === 'campaign' ? 'Кампания' : 'Поток'} #{s.id}:{' '}
+                            {s.ok ? 'удалён(а) при откате' : `не удалось удалить — ${s.error ?? 'ошибка'}`}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </Alert>
                 </div>
               )}
 

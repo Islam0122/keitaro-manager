@@ -18,7 +18,7 @@ async def health(session: SessionDep, settings_service: SettingsServiceDep) -> H
     try:
         await session.execute(text("SELECT 1"))
         configured = (await settings_service.resolve()).configured
-    except Exception as exc:  # noqa: BLE001 - health must always answer
+    except Exception as exc:
         logger.error("Health check database error: %s", exc)
         database = "error"
     return HealthOut(

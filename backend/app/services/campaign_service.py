@@ -9,9 +9,9 @@ from typing import Any, TypeVar
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.core.exceptions import ValidationAppError
+from app.core.exceptions import OperationFailedError, ValidationAppError, keitaro_status
 from app.integrations.keitaro.client import KeitaroClient
-from app.integrations.keitaro.exceptions import KeitaroError, KeitaroNotFoundError
+from app.integrations.keitaro.exceptions import KeitaroAPIError, KeitaroError, KeitaroNotFoundError
 from app.repositories.campaign_repository import CampaignRepository
 from app.schemas.campaign import (
     CampaignCreate,
@@ -28,12 +28,15 @@ from app.services.audit import AuditLogger
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
+GEO_STREAM_NAME = "GEO Redirect"
+OFFER_STREAM_NAME = "Offers"
+
 
 def _names(items: Iterable[Any]) -> dict[int, str]:
     return {item.id: item.name for item in items}
 
 
-async def _tolerant(coro: Awaitable[T], default: T, what: str) -> T:
+async def _tolerant[T](coro: Awaitable[T], default: T, what: str) -> T:
     try:
         return await coro
     except KeitaroError as exc:
@@ -75,6 +78,7 @@ class CampaignService:
         self.safe_url = safe_url
         self.repo = CampaignRepository(session)
         self.audit = AuditLogger(session)
+        self._created_streams: list[int] = []
 
     # ------------------------------------------------------------------ read
     async def _lookups(self) -> tuple[dict[int, str], dict[int, str], dict[int, str]]:
@@ -173,57 +177,154 @@ class CampaignService:
         )
 
     # ----------------------------------------------------------------- write
-    async def create(self, data: CampaignCreate) -> CampaignDetail:
+    async def _validate_references(self, data: CampaignCreate) -> None:
+        """Check offer, domain, group and traffic source *before* anything is written to Keitaro."""
+
+        async def offer_exists() -> bool:
+            try:
+                await self.client.get_offer(data.offer_id)
+            except KeitaroNotFoundError:
+                return False
+            return True
+
+        offer_ok, domains, groups, sources = await asyncio.gather(
+            offer_exists(),
+            self.client.list_domains(),
+            self.client.list_groups("campaign"),
+            self.client.list_traffic_sources(),
+        )
+        errors: list[dict[str, str]] = []
+        if not offer_ok:
+            errors.append({"field": "offer_id", "message": f"Оффер #{data.offer_id} не найден в Keitaro"})
+        checks = (
+            ("domain_id", data.domain_id, domains, "Домен"),
+            ("group_id", data.group_id, groups, "Группа"),
+            ("traffic_source_id", data.traffic_source_id, sources, "Источник трафика"),
+        )
+        for field, value, items, label in checks:
+            if not any(int(item.get("id", 0)) == value for item in items):
+                errors.append({"field": field, "message": f"{label} #{value} не найден в Keitaro"})
+        if errors:
+            raise ValidationAppError("; ".join(e["message"] for e in errors), errors=errors)
+
+    async def _compensate(self, campaign_id: int | None, stream_ids: list[int]) -> dict[str, Any]:
+        """Undo a partially created campaign: streams first (newest first), then the campaign itself.
+
+        Keitaro's ``DELETE /campaigns/{id}`` moves the campaign to the archive, which also stops it from serving
+        traffic. Every step is attempted even if a previous one failed; the report lists what needs manual cleanup.
+        """
+        report: dict[str, Any] = {"performed": campaign_id is not None or bool(stream_ids), "ok": True, "steps": []}
+        for stream_id in reversed(stream_ids):
+            report["steps"].append(await self._undo_step("stream", stream_id, self.client.delete_stream(stream_id)))
+        if campaign_id is not None:
+            report["steps"].append(
+                await self._undo_step("campaign", campaign_id, self.client.delete_campaign(campaign_id))
+            )
+        report["ok"] = all(step["ok"] for step in report["steps"])
+        return report
+
+    @staticmethod
+    async def _undo_step(kind: str, object_id: int, operation: Awaitable[None]) -> dict[str, Any]:
         try:
-            await self.client.get_offer(data.offer_id)
-        except KeitaroNotFoundError as exc:
-            raise ValidationAppError(f"Оффер #{data.offer_id} не найден в Keitaro") from exc
+            await operation
+        except KeitaroError as exc:
+            if isinstance(exc, KeitaroNotFoundError):
+                return {"object": kind, "id": object_id, "ok": True, "note": "already absent"}
+            logger.error("Rollback: could not delete %s %s: %s", kind, object_id, exc)
+            return {"object": kind, "id": object_id, "ok": False, "error": str(exc)}
+        return {"object": kind, "id": object_id, "ok": True}
+
+    async def _create_stream(self, payload: dict[str, Any], campaign_id: int) -> dict[str, Any]:
+        stream = await self.client.create_stream(payload)
+        stream_id = stream.get("id")
+        if not isinstance(stream_id, int):
+            raise KeitaroAPIError("Keitaro не вернул ID созданного потока")
+        owner = stream.get("campaign_id")
+        if owner is not None and int(owner) != campaign_id:
+            # keep the id so that compensation deletes it
+            self._created_streams.append(stream_id)
+            raise KeitaroAPIError(
+                f"Поток #{stream_id} создан в кампании #{owner} вместо #{campaign_id}"
+            )
+        return stream
+
+    async def create(self, data: CampaignCreate) -> CampaignDetail:
+        await self._validate_references(data)
 
         async with self.audit.track("campaign.create", details=data.model_dump()) as ctx:
-            campaign_payload = {
-                "name": data.name,
-                "alias": generate_alias(),
-                "type": "position",
-                "state": "active",
-                "group_id": data.group_id,
-                "traffic_source_id": data.traffic_source_id,
-                "domain_id": data.domain_id,
-            }
-            created = CampaignOut.model_validate(await self.client.create_campaign(campaign_payload))
-            ctx["campaign_id"] = created.id
-
+            campaign_id: int | None = None
+            self._created_streams: list[int] = []
             try:
-                geo_stream = await self.client.create_stream(self._geo_stream_payload(created.id, data.country))
-                offer_stream = await self.client.create_stream(self._offer_stream_payload(created.id, data.offer_id))
-            except KeitaroError:
-                logger.warning("Stream creation failed, removing campaign %s", created.id)
-                try:
-                    await self.client.delete_campaign(created.id)
-                except KeitaroError:
-                    logger.exception("Rollback of campaign %s failed", created.id)
-                raise
+                created = CampaignOut.model_validate(await self.client.create_campaign(self._campaign_payload(data)))
+                campaign_id = created.id
+                ctx["campaign_id"] = created.id
 
-            await self.repo.create(
-                keitaro_id=created.id,
-                name=created.name,
-                alias=created.alias,
-                country=data.country,
-                offer_id=data.offer_id,
-                domain_id=data.domain_id,
-                group_id=data.group_id,
-                traffic_source_id=data.traffic_source_id,
-                geo_stream_id=geo_stream.get("id"),
-                offer_stream_id=offer_stream.get("id"),
-            )
-            await self.session.commit()
+                geo_stream = await self._create_stream(self._geo_stream_payload(created.id, data.country), created.id)
+                self._created_streams.append(geo_stream["id"])
+                offer_stream = await self._create_stream(
+                    self._offer_stream_payload(created.id, data.offer_id), created.id
+                )
+                self._created_streams.append(offer_stream["id"])
+
+                await self.repo.create(
+                    keitaro_id=created.id,
+                    name=created.name,
+                    alias=created.alias,
+                    country=data.country,
+                    offer_id=data.offer_id,
+                    domain_id=data.domain_id,
+                    group_id=data.group_id,
+                    traffic_source_id=data.traffic_source_id,
+                    geo_stream_id=geo_stream["id"],
+                    offer_stream_id=offer_stream["id"],
+                )
+                await self.session.commit()
+            except Exception as exc:
+                await self.session.rollback()
+                logger.warning("Campaign creation failed (%s), compensating", exc.__class__.__name__)
+                rollback = await self._compensate(campaign_id, self._created_streams)
+                ctx["details"]["rollback"] = rollback
+                raise self._creation_error(exc, rollback) from exc
             ctx["message"] = f"Создана кампания «{created.name}» с двумя потоками"
         return await self.get_detail(created.id)
 
+    @staticmethod
+    def _creation_error(exc: Exception, rollback: dict[str, Any]) -> OperationFailedError:
+        if isinstance(exc, KeitaroError):
+            status, code = keitaro_status(exc)
+            reason = str(exc)
+        else:
+            status, code, reason = 500, "persistence_failed", "Не удалось сохранить кампанию в базе данных"
+        if not rollback["performed"]:
+            suffix = "В Keitaro ничего не создано."
+        elif rollback["ok"]:
+            suffix = "Все созданные в Keitaro объекты удалены (откат выполнен)."
+        else:
+            left = ", ".join(f"{s['object']} #{s['id']}" for s in rollback["steps"] if not s["ok"])
+            suffix = f"Откат выполнен не полностью — удалите вручную: {left}."
+        return OperationFailedError(
+            f"Кампания не создана: {reason}. {suffix}", status_code=status, code=code, extra={"rollback": rollback}
+        )
+
+    @staticmethod
+    def _campaign_payload(data: CampaignCreate) -> dict[str, Any]:
+        return {
+            "name": data.name,
+            "alias": generate_alias(),
+            # "position": streams are evaluated by their position, the first stream whose filters match wins.
+            "type": "position",
+            "state": "active",
+            "group_id": data.group_id,
+            "traffic_source_id": data.traffic_source_id,
+            "domain_id": data.domain_id,
+        }
+
     def _geo_stream_payload(self, campaign_id: int, country: str) -> dict[str, Any]:
+        """Stream 1: visitors from ``country`` are redirected to the safe URL (Google by default)."""
         return {
             "campaign_id": campaign_id,
             "type": "regular",
-            "name": f"GEO {country} → {self.safe_url}",
+            "name": GEO_STREAM_NAME,
             "position": 1,
             "state": "active",
             "schema": "redirect",
@@ -236,10 +337,11 @@ class CampaignService:
 
     @staticmethod
     def _offer_stream_payload(campaign_id: int, offer_id: int) -> dict[str, Any]:
+        """Stream 2: no filters, so it receives everyone who did not match stream 1."""
         return {
             "campaign_id": campaign_id,
             "type": "regular",
-            "name": "Offers",
+            "name": OFFER_STREAM_NAME,
             "position": 2,
             "state": "active",
             "schema": "landings",
@@ -253,7 +355,8 @@ class CampaignService:
     async def update(self, campaign_id: int, data: CampaignUpdate) -> CampaignDetail:
         changes = data.model_dump(exclude_unset=True, exclude_none=True)
         state = changes.pop("state", None)
-        async with self.audit.track("campaign.update", campaign_id=campaign_id, details=data.model_dump(exclude_unset=True)):
+        details = data.model_dump(exclude_unset=True)
+        async with self.audit.track("campaign.update", campaign_id=campaign_id, details=details):
             if changes:
                 await self.client.update_campaign(campaign_id, changes)
             if state == "active":

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 
 import { offersApi } from '@/api'
-import { errorMessage } from '@/api/client'
+import { ApiError, errorMessage } from '@/api/client'
 import { EmptyState } from '@/components/ui/Alert'
 import { Badge } from '@/components/ui/Badge'
 import { Button, IconButton } from '@/components/ui/Button'
@@ -25,9 +25,10 @@ interface Props {
   data: CampaignOffersResponse
   catalog: Offer[]
   onChange: (data: CampaignOffersResponse) => void
+  onReload: () => void
 }
 
-export function OffersManager({ campaignId, data, catalog, onChange }: Props) {
+export function OffersManager({ campaignId, data, catalog, onChange, onReload }: Props) {
   const toast = useToast()
   const [streamId, setStreamId] = useState<number | null>(data.streams[0]?.stream_id ?? null)
   const [rows, setRows] = useState<Row[]>([])
@@ -53,8 +54,20 @@ export function OffersManager({ campaignId, data, catalog, onChange }: Props) {
   }, [data, streamId])
 
   const activeTotal = useMemo(() => rows.filter((r) => r.state === 'active').reduce((sum, r) => sum + r.share, 0), [rows])
-  const valid = activeTotal === 100 || rows.every((r) => r.state !== 'active')
+  const valid = rows.some((r) => r.state === 'active') && activeTotal === 100
   const available = catalog.filter((o) => !rows.some((r) => r.offer_id === o.id))
+  const hasActive = rows.some((r) => r.state === 'active')
+  // offer ids as loaded from Keitaro — sent with the update so the backend can detect concurrent edits
+  const loadedIds = useMemo(() => data.items.filter((i) => i.stream_id === streamId).map((i) => i.offer_id), [data, streamId])
+
+  function handleError(e: unknown) {
+    if (e instanceof ApiError && e.code === 'stale_stream') {
+      toast.error('Поток изменён в другом месте — данные обновлены, повторите изменения')
+      onReload()
+      return
+    }
+    toast.error(errorMessage(e))
+  }
 
   function update(index: number, patch: Partial<Row>) {
     setRows((list) => list.map((r, i) => (i === index ? { ...r, ...patch } : r)))
@@ -80,11 +93,12 @@ export function OffersManager({ campaignId, data, catalog, onChange }: Props) {
         campaignId,
         streamId,
         rows.map(({ offer_id, share, state }) => ({ offer_id, share, state })),
+        loadedIds,
       )
       onChange(result)
       toast.success('Распределение трафика сохранено')
     } catch (e) {
-      toast.error(errorMessage(e))
+      handleError(e)
     } finally {
       setSaving(false)
     }
@@ -105,7 +119,7 @@ export function OffersManager({ campaignId, data, catalog, onChange }: Props) {
       setNewShare('')
       toast.success('Оффер добавлен, доли пересчитаны')
     } catch (e) {
-      toast.error(errorMessage(e))
+      handleError(e)
     } finally {
       setAdding(false)
     }
@@ -120,7 +134,7 @@ export function OffersManager({ campaignId, data, catalog, onChange }: Props) {
       setToRemove(null)
       toast.success('Оффер удалён, доли пересчитаны')
     } catch (e) {
-      toast.error(errorMessage(e))
+      handleError(e)
     } finally {
       setRemoving(false)
     }
@@ -192,7 +206,9 @@ export function OffersManager({ campaignId, data, catalog, onChange }: Props) {
 
           <div className="flex flex-col gap-3 border-t border-slate-200 bg-slate-50/60 px-5 py-3 md:flex-row md:items-center md:justify-between">
             <p className={cn('text-sm font-medium', valid ? 'text-brand-700' : 'text-red-600')}>
-              Итого: {activeTotal}% {valid ? '✓' : `— должно быть 100% (${activeTotal > 100 ? 'лишние' : 'не хватает'} ${Math.abs(100 - activeTotal)}%)`}
+              {!hasActive && rows.length > 0
+                ? 'Нужен хотя бы один активный оффер'
+                : `Итого по активным: ${activeTotal}% ${valid ? '✓' : `— должно быть 100% (${activeTotal > 100 ? 'лишние' : 'не хватает'} ${Math.abs(100 - activeTotal)}%)`}`}
             </p>
             <div className="flex flex-wrap gap-2">
               <Button size="sm" variant="secondary" onClick={() => redistribute('equal')} disabled={rows.length === 0}>
@@ -202,7 +218,7 @@ export function OffersManager({ campaignId, data, catalog, onChange }: Props) {
                 Пересчитать до 100%
               </Button>
               {dirty && (
-                <Button size="sm" variant="ghost" onClick={() => onChange({ ...data })}>
+                <Button size="sm" variant="ghost" onClick={() => onChange({ ...data })} disabled={saving}>
                   Отменить
                 </Button>
               )}

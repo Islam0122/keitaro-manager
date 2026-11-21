@@ -7,7 +7,7 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-keitaro_manager}
       POSTGRES_USER: ${POSTGRES_USER:-keitaro}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-keitaro}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -23,16 +23,31 @@ services:
       db:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-keitaro}:${POSTGRES_PASSWORD:-keitaro}@db:5432/${POSTGRES_DB:-keitaro_manager}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-keitaro}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-keitaro_manager}
       SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env (cp .env.example .env)}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      ACCESS_TOKEN_TTL_MINUTES: ${ACCESS_TOKEN_TTL_MINUTES:-720}
+      LOGIN_MAX_ATTEMPTS: ${LOGIN_MAX_ATTEMPTS:-5}
+      LOGIN_LOCKOUT_MINUTES: ${LOGIN_LOCKOUT_MINUTES:-15}
       KEITARO_API_URL: ${KEITARO_API_URL:-}
       KEITARO_API_KEY: ${KEITARO_API_KEY:-}
       KEITARO_TIMEOUT: ${KEITARO_TIMEOUT:-15}
+      KEITARO_RETRIES: ${KEITARO_RETRIES:-2}
       KEITARO_MAX_CONCURRENCY: ${KEITARO_MAX_CONCURRENCY:-8}
+      KEITARO_ALLOW_HTTP: ${KEITARO_ALLOW_HTTP:-false}
+      KEITARO_ALLOW_PRIVATE_HOSTS: ${KEITARO_ALLOW_PRIVATE_HOSTS:-false}
+    # Not published on the host: only nginx (frontend container) can reach it. Per-IP login throttling relies on
+    # X-Forwarded-For set by nginx, so the backend must never be exposed directly.
     expose:
       - "8000"
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
 
   frontend:
     build:
@@ -45,6 +60,8 @@ services:
         condition: service_healthy
     ports:
       - "${APP_PORT:-8080}:80"
+    security_opt:
+      - no-new-privileges:true
 
 volumes:
   postgres_data:

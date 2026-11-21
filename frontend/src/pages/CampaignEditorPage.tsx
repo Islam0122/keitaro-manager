@@ -223,7 +223,7 @@ export default function CampaignEditorPage() {
           ) : !offers.data ? (
             <Card><PageLoader label="Загрузка офферов…" /></Card>
           ) : (
-            <OffersManager campaignId={id} data={offers.data} catalog={resources?.offers ?? []} onChange={onOffersChange} />
+            <OffersManager campaignId={id} data={offers.data} catalog={resources?.offers ?? []} onChange={onOffersChange} onReload={reloadAll} />
           )}
         </div>
 

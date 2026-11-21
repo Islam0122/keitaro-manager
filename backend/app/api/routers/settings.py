@@ -31,4 +31,7 @@ async def list_logs(
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> list[CampaignLogOut]:
     logs = await CampaignLogRepository(session).list(campaign_keitaro_id=campaign_id, limit=limit)
-    return [CampaignLogOut.model_validate(log) for log in logs]
+    return [
+        CampaignLogOut.model_validate(log).model_copy(update={"username": log.user.username if log.user else None})
+        for log in logs
+    ]
