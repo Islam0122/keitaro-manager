@@ -3,109 +3,109 @@
 Keitaro Manager — recorded in a TEST environment: the Keitaro Admin API is served by a local emulator.
 
 2
-00:00:07,400 --> 00:00:14,879
+00:00:07,402 --> 00:00:14,859
 Every API endpoint is protected — first, log in.
 
 3
-00:00:14,879 --> 00:00:20,770
+00:00:14,859 --> 00:00:20,753
 Campaigns are read live from the Keitaro API: search, filters, streams and offers per campaign.
 
 4
-00:00:20,770 --> 00:00:26,724
+00:00:20,753 --> 00:00:26,706
 The connection is configured once in Settings — the API key is stored encrypted and never shown.
 
 5
-00:00:26,724 --> 00:00:36,513
+00:00:26,706 --> 00:00:36,507
 Resources: domains, campaign groups, traffic sources and offers — all loaded from Keitaro.
 
 6
-00:00:36,513 --> 00:00:42,030
+00:00:36,507 --> 00:00:42,026
 Part 1 — Campaign Creator. Name, GEO and Offer ID, plus domain, group and traffic source.
 
 7
-00:00:42,030 --> 00:00:44,431
+00:00:42,026 --> 00:00:44,427
 GEO is an ISO country code: US.
 
 8
-00:00:44,431 --> 00:00:48,586
+00:00:44,427 --> 00:00:48,583
 Offer ID: the offer that receives the non-US traffic — #10 Offer A.
 
 9
-00:00:48,586 --> 00:00:54,971
+00:00:48,583 --> 00:00:54,946
 Domain, group and traffic source come from Keitaro and are validated before anything is created.
 
 10
-00:00:54,971 --> 00:01:00,925
+00:00:54,946 --> 00:01:00,900
 Preview: Stream 1 sends US visitors to Google, Stream 2 sends everyone else to the offer (100%).
 
 11
-00:01:00,925 --> 00:01:07,248
+00:01:00,900 --> 00:01:07,224
 Created in Keitaro. If any step failed, the campaign and streams already created would be rolled back.
 
 12
-00:01:07,248 --> 00:01:11,588
+00:01:07,224 --> 00:01:11,567
 Two streams, checked top to bottom (campaign rotation type: position).
 
 13
-00:01:11,588 --> 00:01:16,612
+00:01:11,567 --> 00:01:16,590
 Stream 1 · GEO Redirect: filter Country = US → redirect to https://www.google.com
 
 14
-00:01:16,612 --> 00:01:21,759
+00:01:16,590 --> 00:01:21,737
 Stream 2 · Offers: no filters, so it takes all remaining traffic → Offer A at 100%.
 
 15
-00:01:21,759 --> 00:01:24,984
+00:01:21,737 --> 00:01:24,962
 Part 2 — Campaign Editor. Open an existing campaign.
 
 16
-00:01:24,984 --> 00:01:27,712
+00:01:24,962 --> 00:01:27,691
 One offer receives 100% of the offer stream.
 
 17
-00:01:27,712 --> 00:01:32,200
+00:01:27,691 --> 00:01:32,165
 Add an offer with an empty share → traffic is split equally.
 
 18
-00:01:32,200 --> 00:01:34,600
+00:01:32,165 --> 00:01:34,566
 Saved to Keitaro: 50% / 50%.
 
 19
-00:01:34,600 --> 00:01:41,225
+00:01:34,566 --> 00:01:41,146
 Add a third offer with a fixed 20% share.
 
 20
-00:01:41,225 --> 00:01:44,884
+00:01:41,146 --> 00:01:44,807
 The other offers are rescaled proportionally: 40 / 40 / 20.
 
 21
-00:01:44,884 --> 00:01:47,758
+00:01:44,807 --> 00:01:47,660
 Manual change: set the first offer to 60%…
 
 22
-00:01:47,758 --> 00:01:53,092
+00:01:47,660 --> 00:01:52,992
 Total of active offers = 120% → saving is blocked. Shares must add up to exactly 100%.
 
 23
-00:01:53,092 --> 00:01:55,573
+00:01:52,993 --> 00:01:55,474
 “Normalize to 100%” rescales the shares…
 
 24
-00:01:55,573 --> 00:02:00,241
+00:01:55,474 --> 00:02:00,162
 …to 50 / 33 / 17 (largest-remainder rounding). Now save to Keitaro.
 
 25
-00:02:00,241 --> 00:02:05,363
+00:02:00,162 --> 00:02:05,285
 Remove an offer — with confirmation.
 
 26
-00:02:05,363 --> 00:02:09,633
+00:02:05,285 --> 00:02:09,569
 The remaining offers are rebalanced: 60 / 40 — still exactly 100%.
 
 27
-00:02:09,633 --> 00:02:13,664
+00:02:09,569 --> 00:02:13,600
 Every change sent to Keitaro is audited: action, result and user.
 
 28
-00:02:14,569 --> 00:02:22,969
+00:02:14,508 --> 00:02:22,908
 Source code, setup and migrations: github.com/Islam0122/keitaro-manager
