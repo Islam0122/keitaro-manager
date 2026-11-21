@@ -1,4 +1,4 @@
-from sqlalchemy import BigInteger, Integer, String
+from sqlalchemy import BigInteger, CheckConstraint, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, TimestampMixin
@@ -11,6 +11,10 @@ class Campaign(TimestampMixin, Base):
     """
 
     __tablename__ = "campaigns"
+    __table_args__ = (
+        CheckConstraint("length(country) = 2", name="country_iso2"),
+        CheckConstraint("offer_id > 0", name="offer_id_positive"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     keitaro_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True, nullable=False)

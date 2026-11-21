@@ -65,6 +65,8 @@ class CampaignLogOut(BaseModel):
 
     id: int
     campaign_keitaro_id: int | None
+    user_id: int | None = None
+    username: str | None = None
     action: str
     status: str
     message: str | None

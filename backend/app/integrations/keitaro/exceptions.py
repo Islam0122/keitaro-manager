@@ -33,3 +33,19 @@ class KeitaroAuthError(KeitaroAPIError):
 
 class KeitaroNotFoundError(KeitaroAPIError):
     """404 — requested entity does not exist in Keitaro."""
+
+
+class KeitaroValidationError(KeitaroAPIError):
+    """400/422 — Keitaro rejected the payload."""
+
+
+class KeitaroRateLimitError(KeitaroAPIError):
+    """429 — too many requests."""
+
+    def __init__(self, message: str, retry_after: float | None = None, payload: object | None = None):
+        super().__init__(message, 429, payload)
+        self.retry_after = retry_after
+
+
+class KeitaroServerError(KeitaroAPIError):
+    """5xx — Keitaro itself failed."""

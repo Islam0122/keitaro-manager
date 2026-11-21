@@ -16,8 +16,11 @@ def validate_offer_shares(offers: list[StreamOfferIn]) -> None:
     if len(ids) != len(set(ids)):
         raise ValueError("Оффер не может быть добавлен в поток дважды")
     active = [o for o in offers if o.state == "active"]
-    if active and sum(o.share for o in active) != 100:
-        raise ValueError("Сумма долей активных офферов должна составлять 100%")
+    if offers and not active:
+        raise ValueError("В потоке должен быть хотя бы один активный оффер")
+    total = sum(o.share for o in active)
+    if active and total != 100:
+        raise ValueError(f"Сумма долей активных офферов должна составлять 100% (сейчас {total}%)")
 
 
 class CampaignOfferAdd(BaseModel):
@@ -31,6 +34,10 @@ class CampaignOfferAdd(BaseModel):
 class CampaignOffersUpdate(BaseModel):
     stream_id: int = Field(gt=0)
     offers: list[StreamOfferIn] = Field(min_length=1)
+    expected_offer_ids: list[int] | None = Field(
+        default=None,
+        description="Offer ids the client saw in the stream. If the stream changed meanwhile, 409 is returned.",
+    )
 
     @model_validator(mode="after")
     def _check(self) -> "CampaignOffersUpdate":
@@ -50,3 +57,10 @@ class CampaignOffersResponse(BaseModel):
     campaign_id: int
     items: list[CampaignOfferOut]
     streams: list[OfferStreamSummary]
+
+
+class OfferDistributeIn(BaseModel):
+    stream_id: int = Field(gt=0)
+    mode: Literal["equal", "normalize"] = Field(
+        description="equal — split 100% equally between active offers; normalize — scale current shares to 100%"
+    )

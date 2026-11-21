@@ -4,7 +4,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from app.schemas.offer import StreamOfferIn, validate_offer_shares
 
-REDIRECT_ACTIONS = {"http", "meta", "double_meta", "js", "blank_referrer", "frame", "iframe", "curl", "remote", "formsubmit"}
+REDIRECT_ACTIONS = {
+    "http", "meta", "double_meta", "js", "blank_referrer", "frame", "iframe", "curl", "remote", "formsubmit"
+}
 OTHER_ACTIONS = {"status404", "show_text", "show_html", "do_nothing"}
 
 

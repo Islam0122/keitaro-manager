@@ -5,7 +5,7 @@ from fastapi import APIRouter, Query, Response, status
 from app.api.deps import KeitaroDep, SessionDep
 from app.schemas.campaign import CampaignCreate, CampaignDetail, CampaignListResponse, CampaignUpdate
 from app.schemas.keitaro import StreamOut
-from app.schemas.offer import CampaignOfferAdd, CampaignOffersResponse, CampaignOffersUpdate
+from app.schemas.offer import CampaignOfferAdd, CampaignOffersResponse, CampaignOffersUpdate, OfferDistributeIn
 from app.schemas.stream import StreamIn
 from app.services.campaign_service import CampaignService
 from app.services.offer_service import OfferService
@@ -74,6 +74,17 @@ async def update_offers(
     campaign_id: int, data: CampaignOffersUpdate, keitaro: KeitaroDep, session: SessionDep
 ) -> CampaignOffersResponse:
     return await OfferService(keitaro[0], session).update(campaign_id, data)
+
+
+@router.post(
+    "/{campaign_id}/offers/distribute",
+    response_model=CampaignOffersResponse,
+    summary="Распределить трафик потока: поровну или нормализовать до 100%",
+)
+async def distribute_offers(
+    campaign_id: int, data: OfferDistributeIn, keitaro: KeitaroDep, session: SessionDep
+) -> CampaignOffersResponse:
+    return await OfferService(keitaro[0], session).distribute(campaign_id, data)
 
 
 @router.delete("/{campaign_id}/offers/{offer_id}", response_model=CampaignOffersResponse, summary="Удалить оффер")
