@@ -15,7 +15,9 @@ import type {
   Stream,
   StreamInput,
   StreamOffer,
+  TokenResponse,
   TrafficSource,
+  User,
 } from '@/types/api'
 
 import { http } from './client'
@@ -36,14 +38,30 @@ export const campaignsApi = {
   remove: (id: number) => http.delete(`/campaigns/${id}`),
 }
 
+export const authApi = {
+  login: (username: string, password: string) =>
+    http.post<TokenResponse>('/auth/login', { username, password }).then((r) => r.data),
+  me: () => http.get<User>('/auth/me').then((r) => r.data),
+  changePassword: (current_password: string, new_password: string) =>
+    http.post('/auth/password', { current_password, new_password }),
+}
+
 export const offersApi = {
   list: (campaignId: number) =>
     http.get<CampaignOffersResponse>(`/campaigns/${campaignId}/offers`).then((r) => r.data),
   add: (campaignId: number, data: { offer_id: number; stream_id?: number; share?: number }) =>
     http.post<CampaignOffersResponse>(`/campaigns/${campaignId}/offers`, data).then((r) => r.data),
-  update: (campaignId: number, streamId: number, offers: Omit<StreamOffer, 'id'>[]) =>
+  update: (campaignId: number, streamId: number, offers: Omit<StreamOffer, 'id'>[], expectedOfferIds?: number[]) =>
     http
-      .put<CampaignOffersResponse>(`/campaigns/${campaignId}/offers`, { stream_id: streamId, offers })
+      .put<CampaignOffersResponse>(`/campaigns/${campaignId}/offers`, {
+        stream_id: streamId,
+        offers,
+        expected_offer_ids: expectedOfferIds,
+      })
+      .then((r) => r.data),
+  distribute: (campaignId: number, streamId: number, mode: 'equal' | 'normalize') =>
+    http
+      .post<CampaignOffersResponse>(`/campaigns/${campaignId}/offers/distribute`, { stream_id: streamId, mode })
       .then((r) => r.data),
   remove: (campaignId: number, offerId: number, streamId?: number) =>
     http

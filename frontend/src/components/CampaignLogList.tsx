@@ -2,13 +2,14 @@ import { Badge } from '@/components/ui/Badge'
 import { formatDate } from '@/lib/format'
 import type { CampaignLog } from '@/types/api'
 
-export const ACTION_LABELS: Record<string, string> = {
+const ACTION_LABELS: Record<string, string> = {
   'campaign.create': 'Создание кампании',
   'campaign.update': 'Изменение кампании',
   'campaign.delete': 'Удаление кампании',
   'offer.add': 'Добавление оффера',
   'offer.update': 'Изменение распределения',
   'offer.remove': 'Удаление оффера',
+  'offer.distribute': 'Перераспределение трафика',
   'stream.create': 'Создание потока',
   'stream.update': 'Изменение потока',
   'stream.delete': 'Удаление потока',
@@ -30,6 +31,7 @@ export function CampaignLogList({ logs, showCampaign }: { logs: CampaignLog[]; s
               {showCampaign && log.campaign_keitaro_id && <span className="ml-2 font-mono text-xs text-slate-400">#{log.campaign_keitaro_id}</span>}
             </p>
             {log.message && <p className="truncate text-xs text-slate-500" title={log.message}>{log.message}</p>}
+            {log.username && <p className="text-xs text-slate-400">{log.username}</p>}
           </div>
           <Badge tone={log.status === 'success' ? 'green' : 'red'}>{log.status === 'success' ? 'успешно' : 'ошибка'}</Badge>
         </li>

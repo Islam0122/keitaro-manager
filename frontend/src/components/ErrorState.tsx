@@ -4,7 +4,7 @@ import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
 
 export function ErrorState({ error, code, onRetry }: { error: string; code?: string | null; onRetry?: () => void }) {
-  const notConfigured = code === 'keitaro_not_configured' || code === 'keitaro_auth_failed'
+  const notConfigured = code === 'keitaro_not_configured' || code === 'keitaro_auth_failed' || code === 'unsafe_url'
   return (
     <Alert
       tone={notConfigured ? 'warning' : 'error'}

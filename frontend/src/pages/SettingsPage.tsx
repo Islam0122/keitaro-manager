@@ -2,7 +2,8 @@ import type { FormEvent } from 'react'
 import { useEffect, useState } from 'react'
 
 import { settingsApi } from '@/api'
-import { errorMessage } from '@/api/client'
+import { ApiError, errorMessage } from '@/api/client'
+import { PasswordCard } from '@/components/PasswordCard'
 import { ErrorState } from '@/components/ErrorState'
 import { Alert } from '@/components/ui/Alert'
 import { Badge } from '@/components/ui/Badge'
@@ -38,6 +39,8 @@ export default function SettingsPage() {
     const e: Record<string, string> = {}
     if (!/^https?:\/\/.+/.test(form.api_url.trim())) e.api_url = 'Укажите URL трекера, например https://tracker.example.com'
     if (!settings.data?.api_key_set && !form.api_key.trim()) e.api_key = 'Укажите API-ключ'
+    const urlChanged = (settings.data?.api_url ?? '').replace(/\/+$/, '') !== form.api_url.trim().replace(/\/+$/, '')
+    if (settings.data?.api_key_set && urlChanged && !form.api_key.trim()) e.api_key = 'При смене API URL укажите API-ключ заново'
     const t = Number(form.timeout)
     if (!(t > 0 && t <= 120)) e.timeout = 'От 1 до 120 секунд'
     if (!/^https?:\/\/.+/.test(form.default_safe_url.trim())) e.default_safe_url = 'Укажите корректный URL'
@@ -61,6 +64,9 @@ export default function SettingsPage() {
       void health.reload()
       toast.success('Настройки сохранены')
     } catch (err) {
+      if (err instanceof ApiError && err.fields.length) {
+        setErrors(Object.fromEntries(err.fields.map((f) => [f.field, f.message])))
+      }
       toast.error(errorMessage(err))
     } finally {
       setSaving(false)
@@ -159,6 +165,7 @@ export default function SettingsPage() {
             </div>
           </dl>
         </Card>
+        <PasswordCard />
       </div>
     </>
   )
