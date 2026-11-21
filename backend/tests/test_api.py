@@ -1,4 +1,5 @@
 from app.integrations.keitaro.client import build_base_url
+from tests.fake_keitaro import API_KEY
 
 CREATE = {"name": "Test US", "country": "us", "offer_id": 10, "domain_id": 3, "group_id": 1, "traffic_source_id": 2}
 
@@ -24,7 +25,7 @@ async def test_not_configured(client):
 async def test_settings_mask_and_encrypt(configured):
     data = (await configured.get("/api/settings")).json()
     assert data["api_key_set"] is True
-    assert "valid-key" not in str(data)
+    assert API_KEY not in str(data)
     assert data["source"] == "database"
     # empty key keeps the stored one
     response = await configured.put("/api/settings", json={"api_url": "https://tracker.example.com/", "api_key": ""})
@@ -41,7 +42,7 @@ async def test_connection_wrong_key(configured):
 async def test_auth_error_and_timeout(configured, fake):
     await configured.put("/api/settings", json={"api_url": "https://tracker.example.com", "api_key": "wrong"})
     assert (await configured.get("/api/campaigns")).status_code == 502
-    await configured.put("/api/settings", json={"api_url": "https://tracker.example.com", "api_key": "valid-key"})
+    await configured.put("/api/settings", json={"api_url": "https://tracker.example.com", "api_key": API_KEY})
     fake.timeout = True
     assert (await configured.get("/api/campaigns")).status_code == 504
 
@@ -59,7 +60,7 @@ async def test_create_campaign_with_two_streams(configured, fake):
     assert geo["filters"][0] == {"id": None, "name": "country", "mode": "accept", "payload": ["US"]}
     assert offer["schema"] == "landings"
     assert offer["offers"][0]["offer_id"] == 10 and offer["offers"][0]["share"] == 100
-    posted = [b for m, p, b in fake.requests if m == "POST" and p == "/campaigns"][0]
+    posted = next(b for m, p, b in fake.requests if m == "POST" and p == "/campaigns")
     assert posted["type"] == "position" and posted["domain_id"] == 3 and posted["alias"]
 
     listing = (await configured.get("/api/campaigns")).json()
@@ -100,7 +101,7 @@ async def test_offers_flow(configured):
     assert data["streams"][0]["total_share"] == 100
 
     duplicate = await configured.post(f"/api/campaigns/{cid}/offers", json={"offer_id": 12})
-    assert duplicate.status_code == 422
+    assert duplicate.status_code == 409
 
     stream_id = data["streams"][0]["stream_id"]
     bad = await configured.put(
